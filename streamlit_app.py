@@ -19,6 +19,10 @@ from PROJEKT_Edometr import oblicz_tabele, rysuj_wykresy
 
 st.set_page_config(page_title="Edometr", layout="wide")
 
+# Domyślny przykład: 7 kroków obciążenia, 4 kroków odciążenia (razem 11 punktów)
+N_KROKOW_OBCIAZENIA = 7
+N_KROKOW_ODCIAZENIA = 4
+
 DEFAULT_M = "[0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0]"
 DEFAULT_ZI = "[0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11]"
 def _parse_list(txt: str):
@@ -29,18 +33,45 @@ def _parse_list(txt: str):
 
 
 st.title("Badanie edometryczne")
-st.caption("σ' z kg obciążenia, krzywa h(σ'), e(log σ'), moduły Eoed i |Δe/Δlog σ| na odcinkach.")
+st.caption(
+    "σ′ z kg obciążenia (przelicznik k); krzywa h(σ′); e(σ′) przy osi σ′ logarytmicznej "
+    "(C_c przy obciążaniu, C_s przy odciążaniu — nomenklatura Wiłuna); "
+    "moduły Eoed oraz |Δe/Δlog σ′| na odcinkach."
+)
 
 with st.sidebar:
     st.header("Parametry próbki i aparatury")
-    h0 = st.number_input("h₀ [mm]", value=20.0, min_value=0.1)
-    d0 = st.number_input("d₀ [mm]", value=75.0, min_value=1.0)
-    rho_s = st.number_input("ρₛ (ciężar właściwy stałych cząstek) [-]", value=2.65, format="%.3f")
+    h0 = st.number_input(
+        "h₀ [mm] — wysokość początkowa próbki",
+        value=20.0,
+        min_value=0.1,
+        help="Wysokość próbki w pierścieniu przed obciążeniem.",
+    )
+    d0 = st.number_input(
+        "d₀ [mm] — średnica próbki (pierścień)",
+        value=75.0,
+        min_value=1.0,
+        help="Średnica wewnętrzna pierścienia / próbki.",
+    )
+    rho_s = st.number_input(
+        "ρₛ [–] — ciężar właściwy szkieletu mineralnego (Wiłun)",
+        value=2.65,
+        format="%.3f",
+        help="Nomenklatura jak u Z. Wiłuna: ciężar właściwy szkieletu gruntowego.",
+    )
     w = st.number_input("w (wilgotność) [%]", value=15.0, format="%.2f")
     mm = st.number_input("masa próbki [g]", value=165.0, format="%.2f")
-    ramie = st.number_input("ramię (np. 1:10 → 10)", value=10.0, min_value=0.1)
+    ramie = st.number_input(
+        "Ramię obciążenia (np. 1:10 → 10)",
+        value=10.0,
+        min_value=0.1,
+        help="Stosunek siły na równowadze; stąd σ′ = m·k, k [kPa/kg].",
+    )
 
-st.subheader("Pomiary (kolejność = ścieżka na wykresie)")
+st.subheader(
+    f"Pomiary (kolejność = ścieżka na wykresie; przykład: {N_KROKOW_OBCIAZENIA} kroków obciążenia, "
+    f"{N_KROKOW_ODCIAZENIA} kroki odciążenia)"
+)
 c1, c2, c3 = st.columns(3)
 with c1:
     txt_m = st.text_area("m [kg]", value=DEFAULT_M, height=120)
@@ -48,7 +79,7 @@ with c2:
     txt_zi = st.text_area("zᵢ (odkształcenie / spęk) [mm]", value=DEFAULT_ZI, height=120)
 with c3:
     txt_faza = st.text_area(
-        'faza: lista napisów lub wyrażenie, np. ["Obciążanie"]*7 + ["Odciążanie"]*4',
+        f'Faza: ["Obciążanie"]*{N_KROKOW_OBCIAZENIA} + ["Odciążanie"]*{N_KROKOW_ODCIAZENIA} lub pełna lista',
         value='["Obciążanie", "Obciążanie", "Obciążanie", "Obciążanie", "Obciążanie", "Obciążanie", "Obciążanie", "Odciążanie", "Odciążanie", "Odciążanie", "Odciążanie"]',
         height=120,
     )

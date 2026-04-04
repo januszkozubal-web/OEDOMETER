@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
-# PROJEKT_Edometr.py — badanie edometryczne: krzywa konsolidacji, e(log σ'), Eoed
+# PROJEKT_Edometr.py — badanie edometryczne
 # Uruchom: python PROJEKT_Edometr.py  → PDF + wydruk tabeli (jak w R_kod_edometr.R)
-# Logika zgodna z R: przelicznik kPa z kg, V [cm³], ρ, e₀, odcinki Eoed i wskaźnik |Δe/Δlog σ|
+#
+# Co liczy program (σ' z kg obciążenia przez przelicznik k):
+#   • krzywa  h = f(σ'),
+#   • krzywa  e = f(σ') przy osi σ' w skali logarytmicznej (nomenklatura C_c / C_s — Wiłun),
+#   • moduły edometryczne Eoed [MPa] oraz |Δe/Δlog σ'| na kolejnych odcinkach.
 # =============================================================================
 
 from __future__ import annotations
@@ -46,7 +50,10 @@ def oblicz_tabele(
     faza: List[str],
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """
-    Zwraca tabelę pomiarów z kolumnami jak w R oraz słownik stałych (k_edometr, e0, rho, …).
+    Zwraca tabelę pomiarów oraz słownik stałych (k, e₀, ρ, …).
+
+    h0, d0 — wymiary próbki [mm] (wysokość początkowa, średnica).
+    rho_s — ρₛ, ciężar właściwy szkieletu mineralnego (gruntu) [-], wg nomenklatury Z. Wiłuna.
     """
     if not (len(m_kg) == len(zi_mm) == len(faza)):
         raise ValueError("m, zi i faza muszą mieć tę samą długość.")
@@ -110,32 +117,13 @@ def oblicz_tabele(
     return df, stale
 
 
-def _add_path_arrows(
-    ax: plt.Axes,
-    x: np.ndarray,
-    y: np.ndarray,
-    faza: np.ndarray,
-    tail_frac: float = 0.12,
-) -> None:
-    """Ścieżka z kolorami wg fazy + strzałki na końcu każdego odcinka (jak geom_path w ggplot)."""
+def _rysuj_sciezke_faz(ax: plt.Axes, x: np.ndarray, y: np.ndarray, faza: np.ndarray) -> None:
+    """Ścieżka łamana z kolorami wg fazy (bez strzałek — czytelniejszy rysunek)."""
     if len(x) < 2:
         return
     for i in range(1, len(x)):
         c = KOLOR_OBCIAZANIE if faza[i] == "Obciążanie" else KOLOR_ODCIAZANIE
         ax.plot([x[i - 1], x[i]], [y[i - 1], y[i]], color=c, lw=2, solid_capstyle="round")
-        dx = x[i] - x[i - 1]
-        dy = y[i] - y[i - 1]
-        ln = np.hypot(dx, dy)
-        if ln < 1e-15:
-            continue
-        x0 = x[i] - tail_frac * dx
-        y0 = y[i] - tail_frac * dy
-        ax.annotate(
-            "",
-            xy=(x[i], y[i]),
-            xytext=(x0, y0),
-            arrowprops=dict(arrowstyle="->", color=c, lw=1.5, shrinkA=0, shrinkB=0),
-        )
 
 
 def rysuj_wykresy(
@@ -144,20 +132,20 @@ def rysuj_wykresy(
     sigma_breaks_max: float = 800.0,
     sigma_step: float = 50.0,
 ) -> Tuple[plt.Figure, plt.Figure]:
-    """Dwa wykresy: h(σ') liniowo; e vs σ' oś log (jak ggplot scale_x_log10)."""
+    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s wg Wiłuna)."""
     x = df["sigma_v"].values
     y_h = df["h"].values
     y_e = df["e"].values
     faza = df["faza"].values
 
     fig1, ax1 = plt.subplots(figsize=(9, 5.5))
-    _add_path_arrows(ax1, x, y_h, faza)
+    _rysuj_sciezke_faz(ax1, x, y_h, faza)
     for f, c in [("Obciążanie", KOLOR_OBCIAZANIE), ("Odciążanie", KOLOR_ODCIAZANIE)]:
         mask = df["faza"] == f
         ax1.scatter(x[mask.values], y_h[mask.values], color=c, s=40, zorder=5, label=f)
-    ax1.set_xlabel("σ' [kPa]")
+    ax1.set_xlabel("σ′ [kPa]")
     ax1.set_ylabel("h [mm]")
-    ax1.set_title("Krzywa edometryczna: h = f(σ')")
+    ax1.set_title("Krzywa edometryczna: h = f(σ′)")
     ax1.grid(True, alpha=0.3)
     ax1.legend(loc="best")
     ticks = np.arange(0, sigma_breaks_max + sigma_step, sigma_step)
@@ -166,25 +154,32 @@ def rysuj_wykresy(
 
     fig2, ax2 = plt.subplots(figsize=(9, 5.5))
     xs = df["sigma_log"].values
-    _add_path_arrows(ax2, xs, y_e, faza)
+    _rysuj_sciezke_faz(ax2, xs, y_e, faza)
     for f, c in [("Obciążanie", KOLOR_OBCIAZANIE), ("Odciążanie", KOLOR_ODCIAZANIE)]:
         mask = df["faza"] == f
         ax2.scatter(xs[mask.values], y_e[mask.values], color=c, s=40, zorder=5, label=f)
     ax2.set_xscale("log")
-    ax2.set_xlabel("σ' [kPa] (skala log)")
-    ax2.set_ylabel("e [-]")
-    ax2.set_title("Ściśliwość: e = f(log σ')")
+    ax2.set_xlabel("σ′ [kPa] (oś logarytmiczna)")
+    ax2.set_ylabel("e [–]")
+    ax2.set_title(
+        r"e = f(σ′): oś $\sigma^\prime$ log — obciążanie ($C_c$), odciążanie ($C_s$) — Wiłun"
+    )
     ax2.grid(True, which="both", alpha=0.3)
     ax2.legend(loc="best")
 
-    txt = (
-        f"k = {stale['k_edometr_kPa_per_kg']:.4f} kPa/kg | "
+    txt1 = (
+        f"σ′ z kg: k = {stale['k_edometr_kPa_per_kg']:.4f} kPa/kg | "
         f"e₀ = {stale['e0']:.4f} | "
         f"ρ = {stale['rho_g_cm3']:.3f} g/cm³ | "
         f"ρd = {stale['rho_d_g_cm3']:.3f} g/cm³"
     )
-    fig1.suptitle(txt, fontsize=9, y=0.02)
-    fig2.suptitle(txt, fontsize=9, y=0.02)
+    fig1.suptitle(txt1, fontsize=9, y=0.02)
+    txt2 = (
+        txt1
+        + " | na odcinkach: Eoed [MPa], |Δe/Δlog σ′| — przy obciążaniu w kontekście "
+        r"$C_c$, przy odciążaniu $C_s$"
+    )
+    fig2.suptitle(txt2, fontsize=8, y=0.02)
     fig1.subplots_adjust(bottom=0.18)
     fig2.subplots_adjust(bottom=0.18)
 
@@ -201,8 +196,8 @@ def oblicz_i_rysuj(
     Pełny pipeline: tabela + wykresy + opcjonalnie jeden PDF (2 strony).
 
     Parametry w `d`:
-      h0, d0, rho_s, w, mm, ramie — jak w R;
-      m, zi, faza — listy równej długości.
+      h0, d0 — wymiary próbki [mm]; rho_s — ρₛ szkieletu (Wiłun); w, mm, ramie;
+      m, zi, faza — listy równej długości (kroki obciążenia / odciążenia wg `faza`).
     """
     df, stale = oblicz_tabele(
         h0=d["h0"],
@@ -237,13 +232,13 @@ def oblicz_i_rysuj(
 
 def wydrukuj_podsumowanie(stale: Dict[str, float], df: pd.DataFrame) -> None:
     print("--- Stałe wstępne ---")
-    print(f"k_edometr (kPa na 1 kg obciążenia) = {stale['k_edometr_kPa_per_kg']:.6f}")
+    print(f"k (σ′ z kg obciążenia) [kPa/kg] = {stale['k_edometr_kPa_per_kg']:.6f}")
     print(f"V [cm³] = {stale['V_cm3']:.4f}")
     print(f"ρ [g/cm³] = {stale['rho_g_cm3']:.4f}")
     print(f"ρd [g/cm³] = {stale['rho_d_g_cm3']:.4f}")
     print(f"e₀ = {stale['e0']:.4f}")
     print()
-    print("--- Tabela (σ', faza, Eoed, wskaźnik |Δe/Δlog σ|) ---")
+    print("--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — odniesienie do C_c / C_s na wykresie log) ---")
     cols = ["sigma_v", "faza", "Eoed_MPa", "wskaznik_de_dlog"]
     print(df[cols].to_string(index=False))
     print()
@@ -254,17 +249,25 @@ def wydrukuj_podsumowanie(stale: Dict[str, float], df: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    # Liczba punktów (kroków) w fazie obciążenia i odciążenia — musi zgadzać się z listami m, zi.
+    N_KROKOW_OBCIAZENIA = 7
+    N_KROKOW_ODCIAZENIA = 4
+
     d: Dict[str, Any] = {
+        # h0 — wysokość początkowa próbki [mm]; d0 — średnica próbki (pierścień) [mm]
         "h0": 20.0,
         "d0": 75.0,
+        # ρₛ — ciężar właściwy szkieletu mineralnego [–], nomenklatura Z. Wiłuna
         "rho_s": 2.65,
         "w": 15.0,
         "mm": 165.0,
+        # Ramię obciążenia (np. 1:10 → 10): przelicznik siły z równowagi → σ′ z m [kg]
         "ramie": 10.0,
         "m": [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0],
         "zi": [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11],
-        "faza": ["Obciążanie"] * 7 + ["Odciążanie"] * 4,
+        "faza": ["Obciążanie"] * N_KROKOW_OBCIAZENIA + ["Odciążanie"] * N_KROKOW_ODCIAZENIA,
     }
+    assert len(d["m"]) == N_KROKOW_OBCIAZENIA + N_KROKOW_ODCIAZENIA
     path_pdf, df, stale, _ = oblicz_i_rysuj(d, return_figures=False, save_pdf=True)
     print("Zapisano PDF:", path_pdf)
     wydrukuj_podsumowanie(stale, df)

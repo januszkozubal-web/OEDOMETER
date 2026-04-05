@@ -16,7 +16,11 @@ if str(_ROOT) not in sys.path:
 
 from collections import Counter
 
-from PROJEKT_Edometr import fazy_z_m_kg, oblicz_tabele, rysuj_wykresy
+from PROJEKT_Edometr import (
+    fazy_z_m_kg,
+    oblicz_tabele,
+    rysuj_wykresy,
+)
 
 st.set_page_config(page_title="Edometr", layout="wide")
 

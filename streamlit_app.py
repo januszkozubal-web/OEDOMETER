@@ -36,9 +36,6 @@ HELP_IQR = (
     "Gdy jest mniej niż 4 wartości, nic nie odrzucamy."
 )
 
-# Domyślny przykład: I obciążenie → odciążenie → ponowne obciążenie (fazy z m [kg])
-# I faza: szybszy przyrost zᵢ na początku; po odciążeniu h≈19.4 mm ⇒ zᵢ≈0.6 (przy z₁=0, h₀=20);
-# ponowne obciążenie: nieznacznie większe zᵢ niż po odciążeniu.
 DEFAULT_M = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0, 2, 4, 8]
 DEFAULT_ZI = [0, 0.12, 0.24, 0.40, 0.54, 0.95, 1.22, 1.22, 1.05, 0.78, 0.60, 0.62, 0.70, 0.78]
 

@@ -34,6 +34,10 @@ KOLORY_FAZ: Dict[str, str] = {
     "Ponowne obciążanie": KOLOR_PONOWNE_OBCIAZANIE,
 }
 
+# Gdy σ′ = 0 w pomiarze, na wykresie półlogarytmicznym e(σ′) podstawiamy σ′ [kPa], żeby uniknąć log(0).
+# Wcześniej 0,1 kPa; przyjęto 1 kPa jako dolną sensowną granicę osi log.
+SIGMA_LOG_ZAMIAST_ZERA_KPA = 1.0
+
 
 def fazy_z_m_kg(m_kg: List[float]) -> List[str]:
     """
@@ -180,7 +184,9 @@ def oblicz_tabele(
     df["delta_h"] = df["zi"] - z1
     df["h"] = h0 - df["delta_h"]
     df["e"] = e0 - (df["delta_h"] / h0) * (1.0 + e0)
-    df["sigma_log"] = np.where(df["sigma_v"].values == 0, 0.1, df["sigma_v"].values)
+    df["sigma_log"] = np.where(
+        df["sigma_v"].values == 0, SIGMA_LOG_ZAMIAST_ZERA_KPA, df["sigma_v"].values
+    )
 
     sig = df["sigma_v"].values
     h_ = df["h"].values

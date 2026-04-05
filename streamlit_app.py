@@ -7,8 +7,10 @@ import math
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
+from scipy.interpolate import UnivariateSpline
 
 # Import modułu projektu (ten sam katalog co ten plik)
 _ROOT = Path(__file__).resolve().parent
@@ -18,6 +20,7 @@ if str(_ROOT) not in sys.path:
 from collections import Counter
 
 from PROJEKT_Edometr import (
+    SIGMA_LOG_ZAMIAST_ZERA_KPA,
     fazy_z_m_kg,
     oblicz_tabele,
     rysuj_wykresy,
@@ -53,6 +56,66 @@ def _fmt_stale(x: object, nd: int = 4) -> str:
     if math.isnan(xf):
         return "—"
     return f"{xf:.{nd}f}"
+
+
+def wyznacz_sigma_p_casagrande(df: pd.DataFrame) -> float:
+    """
+    Automatyczna próba wyznaczenia ciśnienia prekonsolidacji σ′p metodą Casagrande (wykres e–log σ′).
+
+    Działa na fazie „Obciążanie” (I obciążenie / NC). Punkty z σ′ poniżej dolnej granicy osi log
+    (jak przy zastępczym σ′ przy zerze w tabeli) są pomijane — spójnie z `SIGMA_LOG_ZAMIAST_ZERA_KPA`.
+    """
+    # Tylko pierwsze obciążenie (kolumna „faza” == Obciążanie); bez σ′ < 1 kPa (artefakty małych naprężeń / log)
+    mask = (df["faza"] == "Obciążanie") & (df["sigma_v"] >= SIGMA_LOG_ZAMIAST_ZERA_KPA)
+    df_nc = df.loc[mask, ["sigma_v", "e"]].copy()
+    df_nc = df_nc.sort_values("sigma_v").drop_duplicates(subset=["sigma_v"], keep="first")
+    if len(df_nc) < 4:
+        return float("nan")
+
+    log_s = np.log10(df_nc["sigma_v"].values.astype(float))
+    e = df_nc["e"].values.astype(float)
+
+    # 1. Wygładzenie e(log σ′) splajnem — potrzebne do stabilnej pierwszej i drugiej pochodnej (krzywizna).
+    # Parametr s > 0: kompromis między dopasowaniem do punktów a gładkością (mniejsze s → bliżej danych).
+    spl = UnivariateSpline(log_s, e, s=0.001)
+
+    # Gęsta siatka na odcinku log σ′, żeby wyszukać maksimum krzywizny
+    x_fine = np.linspace(log_s.min(), log_s.max(), 500)
+    y_fine = spl(x_fine)
+
+    # Pochodne de/d(log σ′) i d²e/d(log σ′)²
+    dy = spl.derivative(1)(x_fine)
+    ddy = spl.derivative(2)(x_fine)
+
+    # Krzywizna krzywej e vs log σ′: κ = |y″| / (1 + y′²)^(3/2) — klasyczna geometria krzywej y(x)
+    curvature = np.abs(ddy) / (1.0 + dy**2) ** 1.5
+    idx_max_k = int(np.argmax(curvature))
+
+    x_k = x_fine[idx_max_k]  # log10(σ′) w punkcie maksymalnej krzywizny („kolano”)
+    y_k = y_fine[idx_max_k]  # e w tym punkcie
+    m_k = dy[idx_max_k]  # nachylenie stycznej de/d(log σ′)
+
+    # 2. Konstrukcja Casagrande: dwusieczna kąta między styczną a poziomem (oś e — poziomo w układzie e vs log σ′)
+    angle_tangent = np.arctan(m_k)
+    angle_horizontal = 0.0
+    angle_bisector = (angle_tangent + angle_horizontal) / 2.0
+    m_bisector = np.tan(angle_bisector)
+
+    # 3. Przybliżona „linia dziewiczej ściśliwości” (NC): prosta przez dwa ostatnie punkty obciążania
+    # (środek odcinka końcowego, stromego odcinka kompresji normalnej na e–log σ′).
+    m_nc_line = (e[-1] - e[-2]) / (log_s[-1] - log_s[-2])
+    b_nc_line = e[-1] - m_nc_line * log_s[-1]
+
+    # 4. Przecięcie dwusiecznej z linią NC: y = m_bis·x + b_bis oraz y = m_nc·x + b_nc
+    b_bisector = y_k - m_bisector * x_k
+    denom = m_bisector - m_nc_line
+    if not np.isfinite(denom) or abs(denom) < 1e-14:
+        return float("nan")
+    log_sigma_p = (b_nc_line - b_bisector) / denom
+    sigma_p = 10.0 ** log_sigma_p
+    if not np.isfinite(sigma_p) or sigma_p <= 0:
+        return float("nan")
+    return float(sigma_p)
 
 
 def _oczysc_pomiary(df: pd.DataFrame) -> pd.DataFrame:
@@ -231,6 +294,13 @@ elif "df_edo" in st.session_state:
             f"Tylko „Odciążanie” — n = {stale.get('srednia_Cs_n', 0)}, "
             f"odrzucono {stale.get('srednia_Cs_odrzucono', 0)}"
         )
+    sigma_p_cas = wyznacz_sigma_p_casagrande(df)
+    st.metric(
+        "σ′p — Casagrande (auto) [kPa]",
+        _fmt_stale(sigma_p_cas),
+        help="Szacunek ciśnienia prekonsolidacji z maksimum krzywizny krzywej e–log σ′ (I obciążenie); "
+        "dwusieczna + prosta NC z końcowego odcinka — wynik orientacyjny.",
+    )
     fig1, fig2 = rysuj_wykresy(df, stale)
     st.subheader("Wykresy: h(σ′) oraz e(log σ′)")
     g1, g2 = st.columns(2)

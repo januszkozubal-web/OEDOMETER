@@ -441,8 +441,19 @@ def _scatter_punkty_faza_iqr(
         outs = [i for i in idx if i in out_set]
         ins = [i for i in idx if i in in_set]
         nas = [i for i in idx if i not in out_set and i not in in_set]
+        # Najpierw kółka z etykietą fazy — legenda bierze pierwszy wpis z daną nazwą; krzyżyki bez etykiety fazy.
         lab: Optional[str] = f
+        if ins:
+            ax.scatter(xv[ins], yv[ins], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=5, label=lab)
+            lab = None
+        if nas:
+            ax.scatter(xv[nas], yv[nas], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=5, label=lab)
+            lab = None
         if outs:
+            if lab is not None:
+                # Wszystkie punkty fazy odstają — legenda i tak pokazuje kółko (seria), nie krzyżyk.
+                ax.scatter([], [], s=40, color=c, edgecolors=c, linewidths=0.8, label=lab)
+                lab = None
             ax.scatter(
                 xv[outs],
                 yv[outs],
@@ -450,15 +461,9 @@ def _scatter_punkty_faza_iqr(
                 marker="x",
                 c=c,
                 linewidths=1.8,
-                zorder=5,
-                label=lab,
+                zorder=6,
+                label=None,
             )
-            lab = None
-        if ins:
-            ax.scatter(xv[ins], yv[ins], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=6, label=lab)
-            lab = None
-        if nas:
-            ax.scatter(xv[nas], yv[nas], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=6, label=lab)
 
 
 def rysuj_wykresy(

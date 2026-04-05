@@ -133,7 +133,7 @@ def _oczysc_pomiary(df: pd.DataFrame) -> pd.DataFrame:
 st.title("Badanie edometryczne")
 st.caption(
     "σ′ z kg obciążenia (przelicznik k); krzywa h(σ′); e(σ′) przy osi σ′ logarytmicznej. "
-    "Średnie: C_c z odcinków I obciążenia (NC), C_s z odciążenia — obie bez fazy ponownego obciążenia; "
+    "Średnie: C_c z odcinków I obciążenia (NC), C_s z odcinków ponownego obciążenia (OC); "
     "Eoed NC / Eoed OC osobno."
 )
 
@@ -249,8 +249,8 @@ elif "df_edo" in st.session_state:
     st.subheader("Średnie bez odstających (IQR 1,5×)", help=HELP_IQR)
     st.caption(
         "Eoed NC / Eoed OC — jak wyżej. C_c i C_s — tak samo rozdzielone: "
-        "C_c tylko z fazy „Obciążanie” (NC), C_s tylko z „Odciążanie”; "
-        "ponowne obciążenie nie miesza się do C_c ani C_s."
+        "C_c tylko z fazy „Obciążanie” (NC), C_s tylko z „Ponowne obciążanie” (OC); "
+        "faza odciążenia nie wchodzi do C_c ani C_s."
     )
     e1, e2 = st.columns(2)
     with e1:
@@ -286,12 +286,12 @@ elif "df_edo" in st.session_state:
         )
     with m3:
         st.metric(
-            "C_s (odciąż., śr.) [|Δe/Δlog σ′|]",
+            "C_s (OC, śr.) [|Δe/Δlog σ′|]",
             _fmt_stale(stale.get("srednia_Cs")),
             help=HELP_IQR,
         )
         st.caption(
-            f"Tylko „Odciążanie” — n = {stale.get('srednia_Cs_n', 0)}, "
+            f"Tylko „Ponowne obciążanie” — n = {stale.get('srednia_Cs_n', 0)}, "
             f"odrzucono {stale.get('srednia_Cs_odrzucono', 0)}"
         )
     sigma_p_cas = wyznacz_sigma_p_casagrande(df)
@@ -322,7 +322,7 @@ elif "df_edo" in st.session_state:
     ].copy()
     show = show.rename(
         columns={
-            "wskaznik_de_dlog": "|Δe/Δlog σ′| (NC→C_c, odciążenie→C_s, ponowne→inne)",
+            "wskaznik_de_dlog": "|Δe/Δlog σ′| (NC→C_c, OC→C_s; odciążanie bez średniej C)",
         }
     )
     st.dataframe(show, use_container_width=True)

@@ -5,7 +5,7 @@
 #
 # Co liczy program (σ' z kg obciążenia przez przelicznik k):
 #   • krzywa  h = f(σ'),
-#   • krzywa  e = f(σ') przy osi σ' w skali logarytmicznej (C_c / C_s / OC — Wiłun),
+#   • krzywa  e = f(σ') przy osi σ' w skali logarytmicznej (C_c z NC, C_s z OC / ponowne obciążenie),
 #   • moduły edometryczne Eoed [MPa] oraz |Δe/Δlog σ'| na kolejnych odcinkach.
 # =============================================================================
 
@@ -20,6 +20,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 KATALOG = os.path.dirname(os.path.abspath(__file__))
 
@@ -120,20 +121,55 @@ def srednia_bez_odstajacych_iqr(values: np.ndarray) -> Tuple[float, int, int]:
     return (float(np.mean(kept)), n_kept, n_out)
 
 
+def iqr_kept_mask(values: np.ndarray) -> np.ndarray:
+    """
+    Maska tej samej długości co `values`: True tylko tam, gdzie wartość skończona
+    weszłaby do średniej z `srednia_bez_odstajacych_iqr` (nie jest odstająca po IQR 1,5×).
+    Dla NaN — False. Gdy po IQR nie zostaje żadna wartość (średnia = mediana wszystkich),
+    wszystkie skończone → False (żadna pojedyncza nie jest „w średniej arytmetycznej”).
+    """
+    v = np.asarray(values, dtype=float)
+    n = int(v.size)
+    out = np.zeros(n, dtype=bool)
+    fin = np.isfinite(v)
+    if not fin.any():
+        return out
+    idx_fin = np.flatnonzero(fin)
+    vf = v[fin]
+    n_all = int(vf.size)
+    if n_all == 0:
+        return out
+    if n_all < 4:
+        out[idx_fin] = True
+        return out
+    q1, q3 = np.percentile(vf, [25.0, 75.0])
+    iqr = float(q3 - q1)
+    if iqr <= 0.0:
+        out[idx_fin] = True
+        return out
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    m = (vf >= lo) & (vf <= hi)
+    n_kept = int(np.count_nonzero(m))
+    if n_kept == 0:
+        return out
+    out[idx_fin] = m
+    return out
+
+
 def srednie_odporne(df: pd.DataFrame) -> Dict[str, Any]:
     """
     Średnie Eoed [MPa] oddzielnie: NC (faza „Obciążanie”) i OC („Ponowne obciążenie”).
 
-    |Δe/Δlog σ′| w ujęciu jak Eoed: **C_c** wyłącznie z odcinków fazy **Obciążanie** (I obciążenie / NC),
-    bez fazy ponownego obciążenia; **C_s** wyłącznie z fazy **Odciążanie**. Faza „Ponowne obciążenie”
-    nie wchodzi ani do C_c, ani do C_s. Wszystko po IQR 1,5×.
+    |Δe/Δlog σ′|: **C_c** — wyłącznie z odcinków fazy **Obciążanie** (I obciążenie / NC);
+    **C_s** — wyłącznie z odcinków fazy **Ponowne obciążenie** (OC, ponowne ściskanie).
+    Faza **Odciążanie** nie wchodzi do średnich C_c ani C_s. Wszystko po IQR 1,5×.
     """
     m_nc = df.loc[df["faza"] == "Obciążanie", "Eoed_MPa"].values
     m_oc = df.loc[df["faza"] == "Ponowne obciążanie", "Eoed_MPa"].values
     eoed_nc, n_nc, o_nc = srednia_bez_odstajacych_iqr(m_nc)
     eoed_oc, n_oc, o_oc = srednia_bez_odstajacych_iqr(m_oc)
     m_cc = df.loc[df["faza"] == "Obciążanie", "wskaznik_de_dlog"].values
-    m_cs = df.loc[df["faza"] == "Odciążanie", "wskaznik_de_dlog"].values
+    m_cs = df.loc[df["faza"] == "Ponowne obciążanie", "wskaznik_de_dlog"].values
     cc, nc, oc = srednia_bez_odstajacych_iqr(m_cc)
     cs, ns, os_ = srednia_bez_odstajacych_iqr(m_cs)
     return {
@@ -243,13 +279,194 @@ def _rysuj_sciezke_faz(ax: plt.Axes, x: np.ndarray, y: np.ndarray, faza: np.ndar
         ax.plot([x[i - 1], x[i]], [y[i - 1], y[i]], color=c, lw=2, solid_capstyle="round")
 
 
+def _proste_h_od_Eoed(
+    ax: plt.Axes,
+    sigma_nc: float,
+    h_nc: float,
+    sigma_oc: float,
+    h_oc: float,
+    sigma_max: float,
+    e_nc_mpa: float,
+    e_oc_mpa: float,
+) -> None:
+    """
+    Dwie proste h(σ′) do porównania: nachylenie jak w definicji Eoed w tym pliku,
+    dh/dσ′ ≈ −h/(E·1000) (σ′ [kPa], h [mm], E [MPa]).
+
+    NC — od pierwszego pomiaru (początek I etapu, h₀ próbki).
+    OC — od pierwszego pomiaru fazy „Ponowne obciążanie” (początek II etapu obciążania).
+    """
+    def _segment(
+        sigma_ref: float,
+        h_ref: float,
+        e_mpa: float,
+        color: str,
+        label: str,
+    ) -> None:
+        if not np.isfinite(e_mpa) or e_mpa <= 0:
+            return
+        if not np.isfinite(sigma_ref) or not np.isfinite(h_ref):
+            return
+        if sigma_ref > sigma_max - 1e-12:
+            return
+        sig = np.array([sigma_ref, sigma_max], dtype=float)
+        dh_dsig = -h_ref / (e_mpa * 1000.0)
+        h_line = h_ref + dh_dsig * (sig - sigma_ref)
+        ax.plot(sig, h_line, "--", color=color, lw=1.8, zorder=4, label=label)
+
+    _segment(
+        sigma_nc,
+        h_nc,
+        e_nc_mpa,
+        KOLOR_OBCIAZANIE,
+        fr"prosta $E_{{\mathrm{{oed}},\mathrm{{NC}}}}$ = {e_nc_mpa:.2f} MPa",
+    )
+    _segment(
+        sigma_oc,
+        h_oc,
+        e_oc_mpa,
+        KOLOR_PONOWNE_OBCIAZANIE,
+        fr"prosta $E_{{\mathrm{{oed}},\mathrm{{OC}}}}$ = {e_oc_mpa:.2f} MPa",
+    )
+
+
+def _proste_e_od_Cc_Cs(
+    ax: plt.Axes,
+    sigma_cc_ref: float,
+    e_cc_ref: float,
+    sigma_cs_ref: float,
+    e_cs_ref: float,
+    sigma_max_plot: float,
+    cc: float,
+    cs: float,
+) -> None:
+    """
+    Proste na wykresie e(σ′) przy osi σ′ log: nachylenie względem log₁₀ σ′ jak |Δe/Δlog σ′|
+    ze średnich C_c (NC) i C_s (OC):
+
+      e = e_ref − C · (log₁₀ σ′ − log₁₀ σ′_ref).
+
+    **C_c** — od pierwszego pomiaru fazy „Obciążanie” do σ′ max w badaniu (I etap / NC).
+    **C_s** — od pierwszego pomiaru fazy „Ponowne obciążenie” do σ′ max (II etap obciążenia / OC),
+    ta sama postać co wyżej; kolor jak faza OC (nie mylić z odciążaniem).
+    """
+    def e_na_prostej(sigma: np.ndarray, e_ref: float, sig_ref: float, c: float) -> np.ndarray:
+        s = np.maximum(np.asarray(sigma, dtype=float), 1e-15)
+        sr = float(max(sig_ref, 1e-15))
+        return e_ref - c * (np.log10(s) - np.log10(sr))
+
+    if np.isfinite(cc) and cc > 0 and np.isfinite(sigma_cc_ref) and np.isfinite(e_cc_ref):
+        if sigma_cc_ref < sigma_max_plot - 1e-15:
+            sig = np.array([sigma_cc_ref, sigma_max_plot], dtype=float)
+            ax.plot(
+                sig,
+                e_na_prostej(sig, e_cc_ref, sigma_cc_ref, cc),
+                "--",
+                color=KOLOR_OBCIAZANIE,
+                lw=1.8,
+                zorder=4,
+                label=fr"prosta $C_c$ = {cc:.4f}",
+            )
+
+    if np.isfinite(cs) and cs > 0 and np.isfinite(sigma_cs_ref) and np.isfinite(e_cs_ref):
+        if sigma_cs_ref < sigma_max_plot - 1e-15:
+            sig = np.array([sigma_cs_ref, sigma_max_plot], dtype=float)
+            ax.plot(
+                sig,
+                e_na_prostej(sig, e_cs_ref, sigma_cs_ref, cs),
+                "--",
+                color=KOLOR_PONOWNE_OBCIAZANIE,
+                lw=1.8,
+                zorder=4,
+                label=fr"prosta $C_s$ (OC) = {cs:.4f}",
+            )
+
+
+def _zbuduj_zbiory_in_out_eoed(df: pd.DataFrame) -> Tuple[set, set]:
+    """Indeksy wierszy: w / poza średnią Eoed (NC lub OC wg fazy)."""
+    faza = df["faza"].values
+    eoed = df["Eoed_MPa"].values
+    in_set: set = set()
+    out_set: set = set()
+    sel_nc = faza == "Obciążanie"
+    sel_oc = faza == "Ponowne obciążanie"
+    kept_nc = iqr_kept_mask(eoed[sel_nc])
+    kept_oc = iqr_kept_mask(eoed[sel_oc])
+    for k, i in enumerate(np.flatnonzero(sel_nc)):
+        if np.isfinite(eoed[i]):
+            (in_set if kept_nc[k] else out_set).add(int(i))
+    for k, i in enumerate(np.flatnonzero(sel_oc)):
+        if np.isfinite(eoed[i]):
+            (in_set if kept_oc[k] else out_set).add(int(i))
+    return in_set, out_set
+
+
+def _zbuduj_zbiory_in_out_dlog(df: pd.DataFrame) -> Tuple[set, set]:
+    """Indeksy wierszy: w / poza średnią |Δe/Δlog σ′| (C_c z NC, C_s z OC)."""
+    faza = df["faza"].values
+    w = df["wskaznik_de_dlog"].values
+    in_set: set = set()
+    out_set: set = set()
+    sel_cc = faza == "Obciążanie"
+    sel_cs = faza == "Ponowne obciążanie"
+    kept_cc = iqr_kept_mask(w[sel_cc])
+    kept_cs = iqr_kept_mask(w[sel_cs])
+    for k, i in enumerate(np.flatnonzero(sel_cc)):
+        if np.isfinite(w[i]):
+            (in_set if kept_cc[k] else out_set).add(int(i))
+    for k, i in enumerate(np.flatnonzero(sel_cs)):
+        if np.isfinite(w[i]):
+            (in_set if kept_cs[k] else out_set).add(int(i))
+    return in_set, out_set
+
+
+def _scatter_punkty_faza_iqr(
+    ax: plt.Axes,
+    xv: np.ndarray,
+    yv: np.ndarray,
+    faza: np.ndarray,
+    in_set: set,
+    out_set: set,
+) -> None:
+    """
+    Punkty wg fazy: puste kółka = odrzucone przez IQR przy średniej, pełne = zaliczone;
+    pozostałe (inna faza lub brak skończonego wskaźnika) — pełne, bez podziału IQR.
+    """
+    fazy = ("Obciążanie", "Odciążanie", "Ponowne obciążanie")
+    for f in fazy:
+        c = KOLORY_FAZ[f]
+        idx = np.flatnonzero(faza == f)
+        if idx.size == 0:
+            continue
+        outs = [i for i in idx if i in out_set]
+        ins = [i for i in idx if i in in_set]
+        nas = [i for i in idx if i not in out_set and i not in in_set]
+        lab: Optional[str] = f
+        if outs:
+            ax.scatter(
+                xv[outs],
+                yv[outs],
+                s=45,
+                facecolors="none",
+                edgecolors=c,
+                linewidths=1.7,
+                zorder=5,
+                label=lab,
+            )
+            lab = None
+        if ins:
+            ax.scatter(xv[ins], yv[ins], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=6, label=lab)
+            lab = None
+        if nas:
+            ax.scatter(xv[nas], yv[nas], s=40, color=c, edgecolors=c, linewidths=0.8, zorder=6, label=lab)
+
+
 def rysuj_wykresy(
     df: pd.DataFrame,
     stale: Dict[str, Any],
-    sigma_breaks_max: float = 800.0,
     sigma_step: float = 50.0,
 ) -> Tuple[plt.Figure, plt.Figure]:
-    """Dwa wykresy: h(σ′) liniowo; e(σ′) przy osi σ′ w skali log. Średnie (IQR) tylko w tabeli / metrykach — nie na wykresie."""
+    """Dwa wykresy: h(σ′) liniowo; e(σ′) przy osi σ′ w skali log. Proste: Eoed NC/OC na h(σ′); C_c (NC) i C_s (OC) na e(log σ′)."""
     x = df["sigma_v"].values
     y_h = df["h"].values
     y_e = df["e"].values
@@ -257,38 +474,127 @@ def rysuj_wykresy(
 
     fig1, ax1 = plt.subplots(figsize=(9, 5.5))
     _rysuj_sciezke_faz(ax1, x, y_h, faza)
-    for f in ("Obciążanie", "Odciążanie", "Ponowne obciążanie"):
-        mask = df["faza"] == f
-        if not mask.any():
-            continue
-        c = KOLORY_FAZ[f]
-        ax1.scatter(x[mask.values], y_h[mask.values], color=c, s=40, zorder=5, label=f)
+    in_eoed, out_eoed = _zbuduj_zbiory_in_out_eoed(df)
+    _scatter_punkty_faza_iqr(ax1, x, y_h, faza, in_eoed, out_eoed)
+    leg_h, _ = ax1.get_legend_handles_labels()
+    leg_extra_h = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="0.35",
+            markersize=8,
+            linestyle="None",
+            label="do średniej Eoed (IQR)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="0.35",
+            markerfacecolor="none",
+            markersize=8,
+            markeredgewidth=1.5,
+            linestyle="None",
+            label="odstające — Eoed (IQR)",
+        ),
+    ]
+    ax1.legend(handles=list(leg_h) + leg_extra_h, loc="best")
+    xmax = float(np.nanmax(x))
+    mask_po = df["faza"] == "Ponowne obciążanie"
+    if mask_po.any():
+        df_po = df.loc[mask_po].iloc[0]
+        sigma_oc0 = float(df_po["sigma_v"])
+        h_oc0 = float(df_po["h"])
+    else:
+        sigma_oc0 = float("nan")
+        h_oc0 = float("nan")
+    _proste_h_od_Eoed(
+        ax1,
+        float(df["sigma_v"].iloc[0]),
+        float(df["h"].iloc[0]),
+        sigma_oc0,
+        h_oc0,
+        xmax,
+        float(stale["srednia_Eoed_NC_MPa"]),
+        float(stale["srednia_Eoed_OC_MPa"]),
+    )
     ax1.set_xlabel("σ′ [kPa]")
     ax1.set_ylabel("h [mm]")
     ax1.set_title("Krzywa edometryczna: h = f(σ′)")
     ax1.grid(True, alpha=0.3)
-    ax1.legend(loc="best")
-    ticks = np.arange(0, sigma_breaks_max + sigma_step, sigma_step)
+    ticks = np.arange(0, xmax + sigma_step, sigma_step)
+    ticks = ticks[ticks <= xmax + 1e-9]
     ax1.set_xticks(ticks)
-    ax1.set_xlim(left=-5, right=max(sigma_breaks_max, np.nanmax(x) * 1.05))
+    ax1.set_xlim(left=-5, right=xmax)
 
     fig2, ax2 = plt.subplots(figsize=(9, 5.5))
     xs = df["sigma_log"].values
     _rysuj_sciezke_faz(ax2, xs, y_e, faza)
-    for f in ("Obciążanie", "Odciążanie", "Ponowne obciążanie"):
-        mask = df["faza"] == f
-        if not mask.any():
-            continue
-        c = KOLORY_FAZ[f]
-        ax2.scatter(xs[mask.values], y_e[mask.values], color=c, s=40, zorder=5, label=f)
+    in_dl, out_dl = _zbuduj_zbiory_in_out_dlog(df)
+    _scatter_punkty_faza_iqr(ax2, xs, y_e, faza, in_dl, out_dl)
+
+    mask_ob = df["faza"] == "I  Obciążanie"
+    mask_po = df["faza"] == "II Obciążanie"
+    if mask_ob.any():
+        r_cc = df.loc[mask_ob].iloc[0]
+        sigma_cc_ref = float(r_cc["sigma_log"])
+        e_cc_ref = float(r_cc["e"])
+    else:
+        sigma_cc_ref = float("nan")
+        e_cc_ref = float("nan")
+    if mask_po.any():
+        r_cs = df.loc[mask_po].iloc[0]
+        sigma_cs_ref = float(r_cs["sigma_log"])
+        e_cs_ref = float(r_cs["e"])
+    else:
+        sigma_cs_ref = float("nan")
+        e_cs_ref = float("nan")
+    sigma_max_plot = float(np.nanmax(xs))
+    _proste_e_od_Cc_Cs(
+        ax2,
+        sigma_cc_ref,
+        e_cc_ref,
+        sigma_cs_ref,
+        e_cs_ref,
+        sigma_max_plot,
+        float(stale["srednia_Cc"]),
+        float(stale["srednia_Cs"]),
+    )
+
+    leg_e, _ = ax2.get_legend_handles_labels()
+    leg_extra_e = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor="0.35",
+            markersize=8,
+            linestyle="None",
+            label=r"do średniej $C_c$ (NC) / $C_s$ (OC) (IQR)",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="0.35",
+            markerfacecolor="none",
+            markersize=8,
+            markeredgewidth=1.5,
+            linestyle="None",
+            label=r"odstające — $|\Delta e/\Delta\log\sigma^\prime|$ (IQR)",
+        ),
+    ]
+    ax2.legend(handles=list(leg_e) + leg_extra_e, loc="best")
     ax2.set_xscale("log")
     ax2.set_xlabel("σ′ [kPa] (oś logarytmiczna)")
     ax2.set_ylabel("e [–]")
     ax2.set_title(
-        r"e = f(σ′): log $\sigma^\prime$ — $C_c$ / $C_s$ / ponowne obciążenie (wsp. $OC$, krzywa ponownego ściskania)"
+        r"e = f(σ′): log $\sigma^\prime$ — $C_c$ (NC), $C_s$ (OC)"
     )
     ax2.grid(True, which="both", alpha=0.3)
-    ax2.legend(loc="best")
 
     txt1 = (
         f"σ′ z kg: k = {stale['k_edometr_kPa_per_kg']:.4f} kPa/kg | "
@@ -300,7 +606,7 @@ def rysuj_wykresy(
     txt2 = (
         txt1
         + " | na odcinkach: Eoed [MPa], |Δe/Δlog σ′| — "
-        r"$C_c$ (I obciążenie), $C_s$ (odciążenie), $OC$ (ponowne obciążenie)"
+        r"$C_c$ (I obciążenie / NC), $C_s$ (II obciążenie / OC)"
     )
     fig2.suptitle(txt2, fontsize=8, y=0.02)
     fig1.subplots_adjust(bottom=0.18)
@@ -385,12 +691,12 @@ def wydrukuj_podsumowanie(stale: Dict[str, Any], df: pd.DataFrame) -> None:
         f"(n={stale['srednia_Cc_n']}, odrzucono {stale['srednia_Cc_odrzucono']})"
     )
     print(
-        f"C_s — |Δe/Δlog σ′| (tylko faza odciążenia): {_fmt(stale['srednia_Cs'])} "
+        f"C_s — |Δe/Δlog σ′| (tylko faza ponownego obciążenia / OC): {_fmt(stale['srednia_Cs'])} "
         f"(n={stale['srednia_Cs_n']}, odrzucono {stale['srednia_Cs_odrzucono']})"
     )
     print()
     print(
-        "--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — C_c / C_s / OC wg fazy na wykresie log) ---"
+        "--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — C_c z NC, C_s z OC na wykresie log) ---"
     )
     cols = ["sigma_v", "faza", "Eoed_MPa", "wskaznik_de_dlog"]
     print(df[cols].to_string(index=False))

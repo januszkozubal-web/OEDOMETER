@@ -14,16 +14,15 @@ _ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from PROJEKT_Edometr import oblicz_tabele, rysuj_wykresy
+from collections import Counter
+
+from PROJEKT_Edometr import fazy_z_m_kg, oblicz_tabele, rysuj_wykresy
 
 st.set_page_config(page_title="Edometr", layout="wide")
 
-# Domyślny przykład: 7 kroków obciążenia, 4 odciążenia (razem 11 punktów — faza z suwaka)
-N_KROKOW_OBCIAZENIA = 7
-N_KROKOW_ODCIAZENIA = 4
-
-DEFAULT_M = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0]
-DEFAULT_ZI = [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11]
+# Domyślny przykład: I obciążenie → odciążenie → ponowne obciążenie (fazy z m [kg])
+DEFAULT_M = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0, 2, 4, 8]
+DEFAULT_ZI = [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11, 0.10, 0.11, 0.12]
 
 
 def _df_pomiary() -> pd.DataFrame:
@@ -45,7 +44,7 @@ def _oczysc_pomiary(df: pd.DataFrame) -> pd.DataFrame:
 st.title("Badanie edometryczne")
 st.caption(
     "σ′ z kg obciążenia (przelicznik k); krzywa h(σ′); e(σ′) przy osi σ′ logarytmicznej "
-    "(C_c przy obciążaniu, C_s przy odciążaniu — nomenklatura Wiłuna); "
+    "(C_c — I obciążenie, C_s — odciążenie, OC — ponowne obciążenie); "
     "moduły Eoed oraz |Δe/Δlog σ′| na odcinkach."
 )
 
@@ -82,7 +81,9 @@ with st.sidebar:
 st.subheader("Pomiary w kolejności ścieżki na wykresie")
 st.caption(
     "Każdy wiersz: obciążenie m [kg] oraz zapis z zegara (odkształcenie) zᵢ [mm]. "
-    "Możesz dodać/usunąć wiersze (+ w tabeli). Fazę ustawiasz suwakiem poniżej."
+    "Możesz dodać/usunąć wiersze (+ w tabeli). Fazy (Obciążanie / Odciążanie / "
+    "Ponowne obciążanie) program wylicza sam z kolejnych kilogramów — pierwszy spadek m → odciążenie, "
+    "pierwszy wzrost po spadku → ponowne obciążenie (plateau przy tym samym m liczy się do bieżącej fazy)."
 )
 df_edit = st.data_editor(
     _df_pomiary(),
@@ -112,31 +113,11 @@ n_rows = len(tab)
 
 if n_rows == 0:
     st.warning("Wpisz co najmniej jeden wiersz z m i zᵢ.")
-    n_krokow_obciazenia = 1
 else:
-    # Pierwsze N punktów = obciążanie, pozostałe = odciążanie (domyślnie jak w przykładzie)
-    default_n = min(N_KROKOW_OBCIAZENIA, n_rows)
-    prev = int(st.session_state.get("edo_n_obciazenia_prev", default_n))
-    start_n = min(max(1, prev), n_rows)
-    n_krokow_obciazenia = st.slider(
-        "Kroki obciążenia (pierwsze N punktów w tabeli — reszta to odciążenie)",
-        min_value=1,
-        max_value=n_rows,
-        value=start_n,
-        help=(
-            f"Np. N={N_KROKOW_OBCIAZENIA}: pierwsze {N_KROKOW_OBCIAZENIA} wierszy rośnie σ′, "
-            f"kolejne {max(0, n_rows - N_KROKOW_OBCIAZENIA)} to powrót (odciążanie)."
-        ),
-        key="edo_n_obciazenia_slider",
-    )
-    st.session_state["edo_n_obciazenia_prev"] = n_krokow_obciazenia
-
-n_odciazenia = max(0, n_rows - n_krokow_obciazenia)
-if n_rows > 0:
-    st.caption(
-        f"Faza: {n_krokow_obciazenia}× Obciążanie + {n_odciazenia}× Odciążanie "
-        f"(łącznie {n_rows} punktów)."
-    )
+    _preview = fazy_z_m_kg(tab["m [kg]"].astype(float).tolist())
+    _cnt = Counter(_preview)
+    _parts = [f"{_cnt[k]}× {k}" for k in ("Obciążanie", "Odciążanie", "Ponowne obciążanie") if _cnt[k]]
+    st.caption("Wykryte fazy z m [kg]: " + " · ".join(_parts) + f" (łącznie {n_rows} punktów).")
 
 run = st.button("Przelicz i rysuj", type="primary")
 
@@ -146,7 +127,7 @@ if run or "df_edo" not in st.session_state:
             raise ValueError("Brak wierszy pomiarowych (m i zᵢ).")
         m_list = tab["m [kg]"].astype(float).tolist()
         zi_list = tab["zᵢ [mm]"].astype(float).tolist()
-        faza_list = ["Obciążanie"] * n_krokow_obciazenia + ["Odciążanie"] * n_odciazenia
+        faza_list = fazy_z_m_kg(m_list)
         if len(faza_list) != len(m_list):
             raise ValueError("Wewnętrzny błąd: długość fazy ≠ liczba punktów.")
         df, stale = oblicz_tabele(

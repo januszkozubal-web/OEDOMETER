@@ -5,7 +5,7 @@
 #
 # Co liczy program (σ' z kg obciążenia przez przelicznik k):
 #   • krzywa  h = f(σ'),
-#   • krzywa  e = f(σ') przy osi σ' w skali logarytmicznej (nomenklatura C_c / C_s — Wiłun),
+#   • krzywa  e = f(σ') przy osi σ' w skali logarytmicznej (C_c / C_s / OC — Wiłun),
 #   • moduły edometryczne Eoed [MPa] oraz |Δe/Δlog σ'| na kolejnych odcinkach.
 # =============================================================================
 
@@ -23,9 +23,56 @@ import matplotlib.pyplot as plt
 
 KATALOG = os.path.dirname(os.path.abspath(__file__))
 
-# Kolory faz (spójne z typowym ggplot: niebieski / czerwony)
+# Kolory faz (ggplot: niebieski / czerwony / zielony — trzecia faza: ponowne obciążenie, m.in. pod OC)
 KOLOR_OBCIAZANIE = "#377EB8"
 KOLOR_ODCIAZANIE = "#E41A1C"
+KOLOR_PONOWNE_OBCIAZANIE = "#4DAF4A"
+
+KOLORY_FAZ: Dict[str, str] = {
+    "Obciążanie": KOLOR_OBCIAZANIE,
+    "Odciążanie": KOLOR_ODCIAZANIE,
+    "Ponowne obciążanie": KOLOR_PONOWNE_OBCIAZANIE,
+}
+
+
+def fazy_z_m_kg(m_kg: List[float]) -> List[str]:
+    """
+    Wykrywa fazy po kolejnych masach na równowadze m [kg] (ścieżka czasowa/kolejność kroków).
+
+    Automatyczna maszyna stanów:
+      • Obciążanie — dopóki m nie spada (dopuszczalne plateau: m[i] == m[i−1]);
+      • Odciążanie — gdy m maleje; dopuszczalne plateau przy min. obciążeniu;
+      • Ponowne obciążanie — gdy po fazie odciążenia m znów rośnie;
+      • kolejne cykle (znów spadek / wzrost) przełączają między odciążeniem a ponownym obciążeniem.
+
+    Pierwszy punkt jest zawsze „Obciążanie” (początek serii).
+    """
+    n = len(m_kg)
+    if n == 0:
+        return []
+    if n == 1:
+        return ["Obciążanie"]
+    m = [float(x) for x in m_kg]
+    nazwy = ("Obciążanie", "Odciążanie", "Ponowne obciążanie")
+    # state: 0 = pierwsze obciążanie, 1 = odciążanie, 2 = ponowne obciążenie
+    state = 0
+    out: List[str] = [nazwy[0]] * n
+    for i in range(1, n):
+        if state == 0:
+            if m[i] < m[i - 1]:
+                state = 1
+        elif state == 1:
+            if m[i] > m[i - 1]:
+                state = 2
+        else:
+            if m[i] < m[i - 1]:
+                state = 1
+        out[i] = nazwy[state]
+    return out
+
+
+def _kolor_dla_fazy(nazwa: str) -> str:
+    return KOLORY_FAZ.get(nazwa, "#666666")
 
 
 def _k_edometr(d0_mm: float, ramie: float) -> float:
@@ -122,7 +169,7 @@ def _rysuj_sciezke_faz(ax: plt.Axes, x: np.ndarray, y: np.ndarray, faza: np.ndar
     if len(x) < 2:
         return
     for i in range(1, len(x)):
-        c = KOLOR_OBCIAZANIE if faza[i] == "Obciążanie" else KOLOR_ODCIAZANIE
+        c = _kolor_dla_fazy(str(faza[i]))
         ax.plot([x[i - 1], x[i]], [y[i - 1], y[i]], color=c, lw=2, solid_capstyle="round")
 
 
@@ -132,7 +179,7 @@ def rysuj_wykresy(
     sigma_breaks_max: float = 800.0,
     sigma_step: float = 50.0,
 ) -> Tuple[plt.Figure, plt.Figure]:
-    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s)."""
+    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s / krzywa ponownego ściskania)."""
     x = df["sigma_v"].values
     y_h = df["h"].values
     y_e = df["e"].values
@@ -140,8 +187,11 @@ def rysuj_wykresy(
 
     fig1, ax1 = plt.subplots(figsize=(9, 5.5))
     _rysuj_sciezke_faz(ax1, x, y_h, faza)
-    for f, c in [("Obciążanie", KOLOR_OBCIAZANIE), ("Odciążanie", KOLOR_ODCIAZANIE)]:
+    for f in ("Obciążanie", "Odciążanie", "Ponowne obciążanie"):
         mask = df["faza"] == f
+        if not mask.any():
+            continue
+        c = KOLORY_FAZ[f]
         ax1.scatter(x[mask.values], y_h[mask.values], color=c, s=40, zorder=5, label=f)
     ax1.set_xlabel("σ′ [kPa]")
     ax1.set_ylabel("h [mm]")
@@ -155,14 +205,17 @@ def rysuj_wykresy(
     fig2, ax2 = plt.subplots(figsize=(9, 5.5))
     xs = df["sigma_log"].values
     _rysuj_sciezke_faz(ax2, xs, y_e, faza)
-    for f, c in [("Obciążanie", KOLOR_OBCIAZANIE), ("Odciążanie", KOLOR_ODCIAZANIE)]:
+    for f in ("Obciążanie", "Odciążanie", "Ponowne obciążanie"):
         mask = df["faza"] == f
+        if not mask.any():
+            continue
+        c = KOLORY_FAZ[f]
         ax2.scatter(xs[mask.values], y_e[mask.values], color=c, s=40, zorder=5, label=f)
     ax2.set_xscale("log")
     ax2.set_xlabel("σ′ [kPa] (oś logarytmiczna)")
     ax2.set_ylabel("e [–]")
     ax2.set_title(
-        r"e = f(σ′): oś $\sigma^\prime$ log — obciążanie ($C_c$), odciążanie ($C_s$) — Wiłun"
+        r"e = f(σ′): log $\sigma^\prime$ — $C_c$ / $C_s$ / ponowne obciążenie (wsp. $OC$, krzywa ponownego ściskania)"
     )
     ax2.grid(True, which="both", alpha=0.3)
     ax2.legend(loc="best")
@@ -176,8 +229,8 @@ def rysuj_wykresy(
     fig1.suptitle(txt1, fontsize=9, y=0.02)
     txt2 = (
         txt1
-        + " | na odcinkach: Eoed [MPa], |Δe/Δlog σ′| — przy obciążaniu w kontekście "
-        r"$C_c$, przy odciążaniu $C_s$"
+        + " | na odcinkach: Eoed [MPa], |Δe/Δlog σ′| — "
+        r"$C_c$ (I obciążenie), $C_s$ (odciążenie), $OC$ (ponowne obciążenie)"
     )
     fig2.suptitle(txt2, fontsize=8, y=0.02)
     fig1.subplots_adjust(bottom=0.18)
@@ -197,7 +250,7 @@ def oblicz_i_rysuj(
 
     Parametry w `d`:
       h0, d0 — wymiary próbki [mm]; rho_s — ρₛ szkieletu (Wiłun); w, mm, ramie;
-      m, zi, faza — listy równej długości (kroki obciążenia / odciążenia wg `faza`).
+      m, zi, faza — listy równej długości (fazy można ustalić funkcją `fazy_z_m_kg(m)`).
     """
     df, stale = oblicz_tabele(
         h0=d["h0"],
@@ -238,7 +291,9 @@ def wydrukuj_podsumowanie(stale: Dict[str, float], df: pd.DataFrame) -> None:
     print(f"ρd [g/cm³] = {stale['rho_d_g_cm3']:.4f}")
     print(f"e₀ = {stale['e0']:.4f}")
     print()
-    print("--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — odniesienie do C_c / C_s na wykresie log) ---")
+    print(
+        "--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — C_c / C_s / OC wg fazy na wykresie log) ---"
+    )
     cols = ["sigma_v", "faza", "Eoed_MPa", "wskaznik_de_dlog"]
     print(df[cols].to_string(index=False))
     print()
@@ -249,10 +304,7 @@ def wydrukuj_podsumowanie(stale: Dict[str, float], df: pd.DataFrame) -> None:
 
 
 def main() -> None:
-    # Liczba punktów (kroków) w fazie obciążenia i odciążenia — musi zgadzać się z listami m, zi.
-    N_KROKOW_OBCIAZENIA = 7
-    N_KROKOW_ODCIAZENIA = 4
-
+    m_list = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0, 2, 4, 8]
     d: Dict[str, Any] = {
         # h0 — wysokość początkowa próbki [mm]; d0 — średnica próbki (pierścień) [mm]
         "h0": 20.0,
@@ -263,11 +315,10 @@ def main() -> None:
         "mm": 165.0,
         # Ramię obciążenia (np. 1:10 → 10): przelicznik siły z równowagi → σ′ z m [kg]
         "ramie": 10.0,
-        "m": [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0],
-        "zi": [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11],
-        "faza": ["Obciążanie"] * N_KROKOW_OBCIAZENIA + ["Odciążanie"] * N_KROKOW_ODCIAZENIA,
+        "m": m_list,
+        "zi": [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11, 0.10, 0.11, 0.12],
+        "faza": fazy_z_m_kg(m_list),
     }
-    assert len(d["m"]) == N_KROKOW_OBCIAZENIA + N_KROKOW_ODCIAZENIA
     path_pdf, df, stale, _ = oblicz_i_rysuj(d, return_figures=False, save_pdf=True)
     print("Zapisano PDF:", path_pdf)
     wydrukuj_podsumowanie(stale, df)

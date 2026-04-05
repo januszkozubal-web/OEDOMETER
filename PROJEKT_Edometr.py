@@ -293,8 +293,8 @@ def _proste_h_od_Eoed(
     Dwie proste h(σ′) do porównania: nachylenie jak w definicji Eoed w tym pliku,
     dh/dσ′ ≈ −h/(E·1000) (σ′ [kPa], h [mm], E [MPa]).
 
-    NC — od pierwszego pomiaru (początek I etapu, h₀ próbki).
-    OC — od pierwszego pomiaru fazy „Ponowne obciążanie” (początek II etapu obciążania).
+    NC — od drugiego pomiaru fazy I (Obciążanie), jeśli jest; inaczej od pierwszego.
+    OC — od drugiego pomiaru fazy II (Ponowne obciążanie), jeśli jest; inaczej od pierwszego.
     """
     def _segment(
         sigma_ref: float,
@@ -346,8 +346,8 @@ def _proste_e_od_Cc_Cs(
 
       e = e_ref − C · (log₁₀ σ′ − log₁₀ σ′_ref).
 
-    **C_c** — od pierwszego pomiaru fazy „Obciążanie” do σ′ max w badaniu (I etap / NC).
-    **C_s** — od pierwszego pomiaru fazy „Ponowne obciążenie” do σ′ max (II etap obciążenia / OC),
+    **C_c** — od drugiego pomiaru fazy „Obciążanie” (I), jeśli jest; inaczej od pierwszego — do σ′ max.
+    **C_s** — od drugiego pomiaru fazy „Ponowne obciążenie” (II), jeśli jest; inaczej od pierwszego — do σ′ max;
     ta sama postać co wyżej; kolor jak faza OC (nie mylić z odciążaniem).
     """
     def e_na_prostej(sigma: np.ndarray, e_ref: float, sig_ref: float, c: float) -> np.ndarray:
@@ -506,18 +506,28 @@ def rysuj_wykresy(
     ]
     ax1.legend(handles=list(leg_h) + leg_extra_h, loc="best")
     xmax = float(np.nanmax(x))
+    mask_ob = df["faza"] == "Obciążanie"
     mask_po = df["faza"] == "Ponowne obciążanie"
-    if mask_po.any():
-        df_po = df.loc[mask_po].iloc[0]
-        sigma_oc0 = float(df_po["sigma_v"])
-        h_oc0 = float(df_po["h"])
+    df_ob = df.loc[mask_ob]
+    if not df_ob.empty:
+        r_nc = df_ob.iloc[1] if len(df_ob) >= 2 else df_ob.iloc[0]
+        sigma_nc0 = float(r_nc["sigma_v"])
+        h_nc0 = float(r_nc["h"])
+    else:
+        sigma_nc0 = float("nan")
+        h_nc0 = float("nan")
+    df_po = df.loc[mask_po]
+    if not df_po.empty:
+        r_oc = df_po.iloc[1] if len(df_po) >= 2 else df_po.iloc[0]
+        sigma_oc0 = float(r_oc["sigma_v"])
+        h_oc0 = float(r_oc["h"])
     else:
         sigma_oc0 = float("nan")
         h_oc0 = float("nan")
     _proste_h_od_Eoed(
         ax1,
-        float(df["sigma_v"].iloc[0]),
-        float(df["h"].iloc[0]),
+        sigma_nc0,
+        h_nc0,
         sigma_oc0,
         h_oc0,
         xmax,
@@ -541,15 +551,17 @@ def rysuj_wykresy(
 
     mask_ob = df["faza"] == "Obciążanie"
     mask_po = df["faza"] == "Ponowne obciążanie"
-    if mask_ob.any():
-        r_cc = df.loc[mask_ob].iloc[0]
+    sub_ob = df.loc[mask_ob]
+    sub_po = df.loc[mask_po]
+    if not sub_ob.empty:
+        r_cc = sub_ob.iloc[1] if len(sub_ob) >= 2 else sub_ob.iloc[0]
         sigma_cc_ref = float(r_cc["sigma_log"])
         e_cc_ref = float(r_cc["e"])
     else:
         sigma_cc_ref = float("nan")
         e_cc_ref = float("nan")
-    if mask_po.any():
-        r_cs = df.loc[mask_po].iloc[0]
+    if not sub_po.empty:
+        r_cs = sub_po.iloc[1] if len(sub_po) >= 2 else sub_po.iloc[0]
         sigma_cs_ref = float(r_cs["sigma_log"])
         e_cs_ref = float(r_cs["e"])
     else:

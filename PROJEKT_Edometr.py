@@ -429,7 +429,7 @@ def _scatter_punkty_faza_iqr(
     out_set: set,
 ) -> None:
     """
-    Punkty wg fazy: puste kółka = odrzucone przez IQR przy średniej, pełne = zaliczone;
+    Punkty wg fazy: krzyżyki = odrzucone przez IQR przy średniej, pełne kółka = zaliczone;
     pozostałe (inna faza lub brak skończonego wskaźnika) — pełne, bez podziału IQR.
     """
     fazy = ("Obciążanie", "Odciążanie", "Ponowne obciążanie")
@@ -446,10 +446,10 @@ def _scatter_punkty_faza_iqr(
             ax.scatter(
                 xv[outs],
                 yv[outs],
-                s=45,
-                facecolors="none",
-                edgecolors=c,
-                linewidths=1.7,
+                s=55,
+                marker="x",
+                c=c,
+                linewidths=1.8,
                 zorder=5,
                 label=lab,
             )
@@ -491,12 +491,11 @@ def rysuj_wykresy(
         Line2D(
             [0],
             [0],
-            marker="o",
+            marker="x",
             color="0.35",
-            markerfacecolor="none",
-            markersize=8,
-            markeredgewidth=1.5,
             linestyle="None",
+            markersize=9,
+            markeredgewidth=1.8,
             label="odstające — Eoed (IQR)",
         ),
     ]
@@ -578,12 +577,11 @@ def rysuj_wykresy(
         Line2D(
             [0],
             [0],
-            marker="o",
+            marker="x",
             color="0.35",
-            markerfacecolor="none",
-            markersize=8,
-            markeredgewidth=1.5,
             linestyle="None",
+            markersize=9,
+            markeredgewidth=1.8,
             label=r"odstające — $|\Delta e/\Delta\log\sigma^\prime|$ (IQR)",
         ),
     ]

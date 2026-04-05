@@ -37,8 +37,10 @@ HELP_IQR = (
 )
 
 # Domyślny przykład: I obciążenie → odciążenie → ponowne obciążenie (fazy z m [kg])
+# I faza: szybszy przyrost zᵢ na początku; po odciążeniu h≈19.4 mm ⇒ zᵢ≈0.6 (przy z₁=0, h₀=20);
+# ponowne obciążenie: nieznacznie większe zᵢ niż po odciążeniu.
 DEFAULT_M = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0, 2, 4, 8]
-DEFAULT_ZI = [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11, 0.10, 0.11, 0.12]
+DEFAULT_ZI = [0, 0.12, 0.24, 0.40, 0.54, 0.95, 1.22, 1.22, 1.05, 0.78, 0.60, 0.62, 0.70, 0.78]
 
 
 def _df_pomiary() -> pd.DataFrame:
@@ -238,7 +240,8 @@ if run or "df_edo" not in st.session_state:
 
 if st.session_state.get("err_edo"):
     st.error(st.session_state["err_edo"])
-elif "df_edo" in st.session_state:
+
+if "df_edo" in st.session_state:
     df = st.session_state["df_edo"]
     stale = st.session_state["stale_edo"]
     st.success(
@@ -305,9 +308,9 @@ elif "df_edo" in st.session_state:
     st.subheader("Wykresy: h(σ′) oraz e(log σ′)")
     g1, g2 = st.columns(2)
     with g1:
-        st.pyplot(fig1, use_container_width=True)
+        st.pyplot(fig1, width="stretch", clear_figure=True)
     with g2:
-        st.pyplot(fig2, use_container_width=True)
+        st.pyplot(fig2, width="stretch", clear_figure=True)
     show = df[
         [
             "m",

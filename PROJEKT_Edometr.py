@@ -535,8 +535,8 @@ def rysuj_wykresy(
     in_dl, out_dl = _zbuduj_zbiory_in_out_dlog(df)
     _scatter_punkty_faza_iqr(ax2, xs, y_e, faza, in_dl, out_dl)
 
-    mask_ob = df["faza"] == "I  Obciążanie"
-    mask_po = df["faza"] == "II Obciążanie"
+    mask_ob = df["faza"] == "Obciążanie"
+    mask_po = df["faza"] == "Ponowne obciążanie"
     if mask_ob.any():
         r_cc = df.loc[mask_ob].iloc[0]
         sigma_cc_ref = float(r_cc["sigma_log"])
@@ -720,7 +720,7 @@ def main() -> None:
         # Ramię obciążenia (np. 1:10 → 10): przelicznik siły z równowagi → σ′ z m [kg]
         "ramie": 10.0,
         "m": m_list,
-        "zi": [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11, 0.10, 0.11, 0.12],
+        "zi": [0, 0.12, 0.24, 0.40, 0.54, 0.95, 1.22, 1.22, 1.05, 0.78, 0.60, 0.62, 0.70, 0.78],
         "faza": fazy_z_m_kg(m_list),
     }
     path_pdf, df, stale, _ = oblicz_i_rysuj(d, return_figures=False, save_pdf=True)

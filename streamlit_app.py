@@ -25,6 +25,14 @@ from PROJEKT_Edometr import (
 
 st.set_page_config(page_title="Edometr", layout="wide")
 
+# Dymek „?” przy nagłówku sekcji średnich — co to IQR
+HELP_IQR = (
+    "IQR (rozstęp międzykwartylowy) = Q3 − Q1 — odległość między pierwszym a trzecim kwartylem "
+    "zbioru wartości na odcinkach. Jak w diagramie pudełkowym (boxplot): za odstające uznaje się "
+    "wartości poza przedziałem [Q1 − 1,5×IQR, Q3 + 1,5×IQR]; dopiero z pozostałych liczona jest średnia. "
+    "Gdy jest mniej niż 4 wartości, nic nie odrzucamy."
+)
+
 # Domyślny przykład: I obciążenie → odciążenie → ponowne obciążenie (fazy z m [kg])
 DEFAULT_M = [0, 0.5, 1, 2, 4, 8, 16, 16, 8, 2, 0, 2, 4, 8]
 DEFAULT_ZI = [0, 0.05, 0.12, 0.25, 0.35, 0.75, 1.20, 1.20, 1.10, 0.95, 0.11, 0.10, 0.11, 0.12]
@@ -175,7 +183,7 @@ elif "df_edo" in st.session_state:
         f"e₀ = {stale['e0']:.4f} | ρ = {stale['rho_g_cm3']:.3f} g/cm³ | "
         f"ρd = {stale['rho_d_g_cm3']:.3f} g/cm³ | V = {stale['V_cm3']:.2f} cm³"
     )
-    st.subheader("Średnie bez odstających (IQR 1,5×)")
+    st.subheader("Średnie bez odstających (IQR 1,5×)", help=HELP_IQR)
     st.caption(
         "Eoed NC / Eoed OC — jak wyżej. C_c i C_s — tak samo rozdzielone: "
         "C_c tylko z fazy „Obciążanie” (NC), C_s tylko z „Odciążanie”; "
@@ -183,26 +191,42 @@ elif "df_edo" in st.session_state:
     )
     e1, e2 = st.columns(2)
     with e1:
-        st.metric("Eoed NC (śr.) [MPa]", _fmt_stale(stale.get("srednia_Eoed_NC_MPa")))
+        st.metric(
+            "Eoed NC (śr.) [MPa]",
+            _fmt_stale(stale.get("srednia_Eoed_NC_MPa")),
+            help=HELP_IQR,
+        )
         st.caption(
             f"I obciążenie — n = {stale.get('srednia_Eoed_NC_n', 0)}, "
             f"odrzucono {stale.get('srednia_Eoed_NC_odrzucono', 0)}"
         )
     with e2:
-        st.metric("Eoed OC (śr.) [MPa]", _fmt_stale(stale.get("srednia_Eoed_OC_MPa")))
+        st.metric(
+            "Eoed OC (śr.) [MPa]",
+            _fmt_stale(stale.get("srednia_Eoed_OC_MPa")),
+            help=HELP_IQR,
+        )
         st.caption(
             f"Ponowne obciążenie — n = {stale.get('srednia_Eoed_OC_n', 0)}, "
             f"odrzucono {stale.get('srednia_Eoed_OC_odrzucono', 0)}"
         )
     m2, m3 = st.columns(2)
     with m2:
-        st.metric("C_c (NC, śr.) [|Δe/Δlog σ′|]", _fmt_stale(stale.get("srednia_Cc")))
+        st.metric(
+            "C_c (NC, śr.) [|Δe/Δlog σ′|]",
+            _fmt_stale(stale.get("srednia_Cc")),
+            help=HELP_IQR,
+        )
         st.caption(
             f"Tylko „Obciążanie” — n = {stale.get('srednia_Cc_n', 0)}, "
             f"odrzucono {stale.get('srednia_Cc_odrzucono', 0)}"
         )
     with m3:
-        st.metric("C_s (odciąż., śr.) [|Δe/Δlog σ′|]", _fmt_stale(stale.get("srednia_Cs")))
+        st.metric(
+            "C_s (odciąż., śr.) [|Δe/Δlog σ′|]",
+            _fmt_stale(stale.get("srednia_Cs")),
+            help=HELP_IQR,
+        )
         st.caption(
             f"Tylko „Odciążanie” — n = {stale.get('srednia_Cs_n', 0)}, "
             f"odrzucono {stale.get('srednia_Cs_odrzucono', 0)}"

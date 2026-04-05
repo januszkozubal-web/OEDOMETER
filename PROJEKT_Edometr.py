@@ -87,7 +87,10 @@ def _wolumen_probki_cm3(h0_mm: float, d0_mm: float) -> float:
 
 def srednia_bez_odstajacych_iqr(values: np.ndarray) -> Tuple[float, int, int]:
     """
-    Średnia arytmetyczna po odrzuceniu obserwacji odstających (pudełko Whisker: IQR × 1,5).
+    Średnia arytmetyczna po odrzuceniu obserwacji odstających.
+
+    IQR (Interquartile Range / rozstęp międzykwartylowy) = Q3 − Q1. Odstające: poza
+    [Q1 − 1,5×IQR, Q3 + 1,5×IQR] (reguła „wąsów” jak w boxplocie). Średnia z wartości nieusuniętych.
 
     Zwraca: (średnia, liczba wartości użytych do średniej, liczba odrzuconych z próby).
     Przy n < 4 odstających nie odrzuca; przy pustej próbie zwraca (nan, 0, 0).

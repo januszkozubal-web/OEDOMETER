@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -33,8 +34,21 @@ def _df_pomiary() -> pd.DataFrame:
     return pd.DataFrame({"m [kg]": DEFAULT_M, "zᵢ [mm]": DEFAULT_ZI})
 
 
+def _fmt_stale(x: object, nd: int = 4) -> str:
+    """Liczba do wyświetlenia albo „—” przy braku / NaN."""
+    if x is None:
+        return "—"
+    try:
+        xf = float(x)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "—"
+    if math.isnan(xf):
+        return "—"
+    return f"{xf:.{nd}f}"
+
+
 def _oczysc_pomiary(df: pd.DataFrame) -> pd.DataFrame:
-    """Wiersze z oboma wartościami liczbowymi; kolejność = ścieżka na wykresie."""
+    """Wiersze z  wartościami liczbowymi; kolejność = ścieżka na wykresie."""
     if df is None or df.empty:
         return pd.DataFrame(columns=["m [kg]", "zᵢ [mm]"])
     out = df.copy()
@@ -47,9 +61,9 @@ def _oczysc_pomiary(df: pd.DataFrame) -> pd.DataFrame:
 
 st.title("Badanie edometryczne")
 st.caption(
-    "σ′ z kg obciążenia (przelicznik k); krzywa h(σ′); e(σ′) przy osi σ′ logarytmicznej "
-    "(C_c — I obciążenie, C_s — odciążenie, OC — ponowne obciążenie); "
-    "moduły Eoed oraz |Δe/Δlog σ′| na odcinkach."
+    "σ′ z kg obciążenia (przelicznik k); krzywa h(σ′); e(σ′) przy osi σ′ logarytmicznej. "
+    "Średnie: C_c z odcinków I obciążenia (NC), C_s z odciążenia — obie bez fazy ponownego obciążenia; "
+    "Eoed NC / Eoed OC osobno."
 )
 
 with st.sidebar:
@@ -58,13 +72,13 @@ with st.sidebar:
         "h₀ [mm] — wysokość początkowa próbki",
         value=20.0,
         min_value=0.1,
-        help="Wysokość próbki w pierścieniu przed obciążeniem.",
+        help="Wysokość próbki w pierścieniu przed obciążeniem pomiar suwmiarką.",
     )
     d0 = st.number_input(
-        "d₀ [mm] — średnica próbki (pierścień)",
+        "d₀ [mm] — średnica próbki",
         value=75.0,
         min_value=1.0,
-        help="Średnica wewnętrzna pierścienia / próbki.",
+        help="Średnica wewnętrzna pierścienia / próbki pomiar suwmiarką.",
     )
     rho_s = st.number_input(
         "ρₛ [–] — ciężar właściwy szkieletu mineralnego (Wiłun)",
@@ -78,13 +92,13 @@ with st.sidebar:
         "Ramię obciążenia (np. 1:10 → 10)",
         value=10.0,
         min_value=0.1,
-        help="Stosunek siły na równowadze; stąd σ′ = m·k, k [kPa/kg].",
+        help="Stosunek siły na równowadze; stąd σ′ = m·k, k [kPa/kg], wsp. k uwzglednia ramię, powierzchnię i 9.81 m/s².",
     )
 
 
 st.subheader("Pomiary w kolejności ścieżki na wykresie")
 st.caption(
-    "Każdy wiersz: obciążenie m [kg] oraz zapis z zegara (odkształcenie) zᵢ [mm]. "
+    "Każdy wiersz: obciążenie m [kg] oraz zapis z zegara wartości zᵢ [mm]. "
     "Możesz dodać/usunąć wiersze (+ w tabeli). Fazy (Obciążanie / Odciążanie / "
     "Ponowne obciążanie) program wylicza sam z kolejnych kilogramów — pierwszy spadek m → odciążenie, "
     "pierwszy wzrost po spadku → ponowne obciążenie (plateau przy tym samym m liczy się do bieżącej fazy)."
@@ -161,7 +175,40 @@ elif "df_edo" in st.session_state:
         f"e₀ = {stale['e0']:.4f} | ρ = {stale['rho_g_cm3']:.3f} g/cm³ | "
         f"ρd = {stale['rho_d_g_cm3']:.3f} g/cm³ | V = {stale['V_cm3']:.2f} cm³"
     )
+    st.subheader("Średnie bez odstających (IQR 1,5×)")
+    st.caption(
+        "Eoed NC / Eoed OC — jak wyżej. C_c i C_s — tak samo rozdzielone: "
+        "C_c tylko z fazy „Obciążanie” (NC), C_s tylko z „Odciążanie”; "
+        "ponowne obciążenie nie miesza się do C_c ani C_s."
+    )
+    e1, e2 = st.columns(2)
+    with e1:
+        st.metric("Eoed NC (śr.) [MPa]", _fmt_stale(stale.get("srednia_Eoed_NC_MPa")))
+        st.caption(
+            f"I obciążenie — n = {stale.get('srednia_Eoed_NC_n', 0)}, "
+            f"odrzucono {stale.get('srednia_Eoed_NC_odrzucono', 0)}"
+        )
+    with e2:
+        st.metric("Eoed OC (śr.) [MPa]", _fmt_stale(stale.get("srednia_Eoed_OC_MPa")))
+        st.caption(
+            f"Ponowne obciążenie — n = {stale.get('srednia_Eoed_OC_n', 0)}, "
+            f"odrzucono {stale.get('srednia_Eoed_OC_odrzucono', 0)}"
+        )
+    m2, m3 = st.columns(2)
+    with m2:
+        st.metric("C_c (NC, śr.) [|Δe/Δlog σ′|]", _fmt_stale(stale.get("srednia_Cc")))
+        st.caption(
+            f"Tylko „Obciążanie” — n = {stale.get('srednia_Cc_n', 0)}, "
+            f"odrzucono {stale.get('srednia_Cc_odrzucono', 0)}"
+        )
+    with m3:
+        st.metric("C_s (odciąż., śr.) [|Δe/Δlog σ′|]", _fmt_stale(stale.get("srednia_Cs")))
+        st.caption(
+            f"Tylko „Odciążanie” — n = {stale.get('srednia_Cs_n', 0)}, "
+            f"odrzucono {stale.get('srednia_Cs_odrzucono', 0)}"
+        )
     fig1, fig2 = rysuj_wykresy(df, stale)
+    st.subheader("Wykresy: h(σ′) oraz e(log σ′)")
     g1, g2 = st.columns(2)
     with g1:
         st.pyplot(fig1, use_container_width=True)
@@ -179,6 +226,11 @@ elif "df_edo" in st.session_state:
             "wskaznik_de_dlog",
         ]
     ].copy()
+    show = show.rename(
+        columns={
+            "wskaznik_de_dlog": "|Δe/Δlog σ′| (NC→C_c, odciążenie→C_s, ponowne→inne)",
+        }
+    )
     st.dataframe(show, use_container_width=True)
     st.download_button(
         "Pobierz CSV",

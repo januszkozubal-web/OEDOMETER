@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # =============================================================================
 # PROJEKT_Edometr.py — badanie edometryczne
-# Uruchom: python PROJEKT_Edometr.py  → PDF + wydruk tabeli (jak w R_kod_edometr.R)
+# Uruchom: python PROJEKT_Edometr.py  → PDF (2 strony) + wydruk tabeli (jak w R_kod_edometr.R)
 #
 # Co liczy program (σ' z kg obciążenia przez przelicznik k):
 #   • krzywa  h = f(σ'),
@@ -85,6 +85,66 @@ def _wolumen_probki_cm3(h0_mm: float, d0_mm: float) -> float:
     return (np.pi * (d0_mm / 10.0) ** 2 / 4.0) * (h0_mm / 10.0)
 
 
+def srednia_bez_odstajacych_iqr(values: np.ndarray) -> Tuple[float, int, int]:
+    """
+    Średnia arytmetyczna po odrzuceniu obserwacji odstających (pudełko Whisker: IQR × 1,5).
+
+    Zwraca: (średnia, liczba wartości użytych do średniej, liczba odrzuconych z próby).
+    Przy n < 4 odstających nie odrzuca; przy pustej próbie zwraca (nan, 0, 0).
+    """
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
+    n_all = int(v.size)
+    if n_all == 0:
+        return (float("nan"), 0, 0)
+    if n_all < 4:
+        return (float(np.mean(v)), n_all, 0)
+    q1, q3 = np.percentile(v, [25.0, 75.0])
+    iqr = float(q3 - q1)
+    if iqr <= 0.0:
+        return (float(np.mean(v)), n_all, 0)
+    lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    mask = (v >= lo) & (v <= hi)
+    kept = v[mask]
+    n_kept = int(kept.size)
+    n_out = n_all - n_kept
+    if n_kept == 0:
+        return (float(np.median(v)), n_all, n_out)
+    return (float(np.mean(kept)), n_kept, n_out)
+
+
+def srednie_odporne(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Średnie Eoed [MPa] oddzielnie: NC (faza „Obciążanie”) i OC („Ponowne obciążenie”).
+
+    |Δe/Δlog σ′| w ujęciu jak Eoed: **C_c** wyłącznie z odcinków fazy **Obciążanie** (I obciążenie / NC),
+    bez fazy ponownego obciążenia; **C_s** wyłącznie z fazy **Odciążanie**. Faza „Ponowne obciążenie”
+    nie wchodzi ani do C_c, ani do C_s. Wszystko po IQR 1,5×.
+    """
+    m_nc = df.loc[df["faza"] == "Obciążanie", "Eoed_MPa"].values
+    m_oc = df.loc[df["faza"] == "Ponowne obciążanie", "Eoed_MPa"].values
+    eoed_nc, n_nc, o_nc = srednia_bez_odstajacych_iqr(m_nc)
+    eoed_oc, n_oc, o_oc = srednia_bez_odstajacych_iqr(m_oc)
+    m_cc = df.loc[df["faza"] == "Obciążanie", "wskaznik_de_dlog"].values
+    m_cs = df.loc[df["faza"] == "Odciążanie", "wskaznik_de_dlog"].values
+    cc, nc, oc = srednia_bez_odstajacych_iqr(m_cc)
+    cs, ns, os_ = srednia_bez_odstajacych_iqr(m_cs)
+    return {
+        "srednia_Eoed_NC_MPa": eoed_nc,
+        "srednia_Eoed_NC_n": n_nc,
+        "srednia_Eoed_NC_odrzucono": o_nc,
+        "srednia_Eoed_OC_MPa": eoed_oc,
+        "srednia_Eoed_OC_n": n_oc,
+        "srednia_Eoed_OC_odrzucono": o_oc,
+        "srednia_Cc": cc,
+        "srednia_Cc_n": nc,
+        "srednia_Cc_odrzucono": oc,
+        "srednia_Cs": cs,
+        "srednia_Cs_n": ns,
+        "srednia_Cs_odrzucono": os_,
+    }
+
+
 def oblicz_tabele(
     h0: float,
     d0: float,
@@ -95,7 +155,7 @@ def oblicz_tabele(
     m_kg: List[float],
     zi_mm: List[float],
     faza: List[str],
-) -> Tuple[pd.DataFrame, Dict[str, float]]:
+) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Zwraca tabelę pomiarów oraz słownik stałych (k, e₀, ρ, …).
 
@@ -154,13 +214,14 @@ def oblicz_tabele(
     df["Eoed_MPa"] = e_oed
     df["wskaznik_de_dlog"] = wsk
 
-    stale = {
+    stale: Dict[str, Any] = {
         "k_edometr_kPa_per_kg": k_ed,
         "V_cm3": V,
         "rho_g_cm3": rho,
         "rho_d_g_cm3": rho_d,
         "e0": e0,
     }
+    stale.update(srednie_odporne(df))
     return df, stale
 
 
@@ -175,11 +236,11 @@ def _rysuj_sciezke_faz(ax: plt.Axes, x: np.ndarray, y: np.ndarray, faza: np.ndar
 
 def rysuj_wykresy(
     df: pd.DataFrame,
-    stale: Dict[str, float],
+    stale: Dict[str, Any],
     sigma_breaks_max: float = 800.0,
     sigma_step: float = 50.0,
 ) -> Tuple[plt.Figure, plt.Figure]:
-    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s / krzywa ponownego ściskania)."""
+    """Dwa wykresy: h(σ′) liniowo; e(σ′) przy osi σ′ w skali log. Średnie (IQR) tylko w tabeli / metrykach — nie na wykresie."""
     x = df["sigma_v"].values
     y_h = df["h"].values
     y_e = df["e"].values
@@ -244,9 +305,9 @@ def oblicz_i_rysuj(
     return_figures: bool = False,
     save_pdf: bool = True,
     pdf_name: str = "PROJEKT_Edometr_wykresy.pdf",
-) -> Tuple[Optional[str], pd.DataFrame, Dict[str, float], Any]:
+) -> Tuple[Optional[str], pd.DataFrame, Dict[str, Any], Any]:
     """
-    Pełny pipeline: tabela + wykresy + opcjonalnie jeden PDF (2 strony).
+    Pełny pipeline: tabela + wykresy + opcjonalnie jeden PDF (2 strony: h(σ′), e(log σ′)).
 
     Parametry w `d`:
       h0, d0 — wymiary próbki [mm]; rho_s — ρₛ szkieletu (Wiłun); w, mm, ramie;
@@ -283,13 +344,41 @@ def oblicz_i_rysuj(
     return path_pdf, df, stale, None
 
 
-def wydrukuj_podsumowanie(stale: Dict[str, float], df: pd.DataFrame) -> None:
+def wydrukuj_podsumowanie(stale: Dict[str, Any], df: pd.DataFrame) -> None:
     print("--- Stałe wstępne ---")
     print(f"k (σ′ z kg obciążenia) [kPa/kg] = {stale['k_edometr_kPa_per_kg']:.6f}")
     print(f"V [cm³] = {stale['V_cm3']:.4f}")
     print(f"ρ [g/cm³] = {stale['rho_g_cm3']:.4f}")
     print(f"ρd [g/cm³] = {stale['rho_d_g_cm3']:.4f}")
     print(f"e₀ = {stale['e0']:.4f}")
+    print()
+    print("--- Średnie bez odstających (IQR 1,5× na odcinkach z skończonymi wskaźnikami) ---")
+
+    def _fmt(x: Any) -> str:
+        try:
+            xf = float(x)
+        except (TypeError, ValueError):
+            return "—"
+        if not np.isfinite(xf):
+            return "—"
+        return f"{xf:.6f}"
+
+    print(
+        f"Eoed NC [MPa] (I obciążenie): {_fmt(stale['srednia_Eoed_NC_MPa'])} "
+        f"(n={stale['srednia_Eoed_NC_n']}, odrzucono {stale['srednia_Eoed_NC_odrzucono']})"
+    )
+    print(
+        f"Eoed OC [MPa] (ponowne obciążenie): {_fmt(stale['srednia_Eoed_OC_MPa'])} "
+        f"(n={stale['srednia_Eoed_OC_n']}, odrzucono {stale['srednia_Eoed_OC_odrzucono']})"
+    )
+    print(
+        f"C_c — |Δe/Δlog σ′| (tylko faza I obciążenia / NC, bez ponownego obciążenia): {_fmt(stale['srednia_Cc'])} "
+        f"(n={stale['srednia_Cc_n']}, odrzucono {stale['srednia_Cc_odrzucono']})"
+    )
+    print(
+        f"C_s — |Δe/Δlog σ′| (tylko faza odciążenia): {_fmt(stale['srednia_Cs'])} "
+        f"(n={stale['srednia_Cs_n']}, odrzucono {stale['srednia_Cs_odrzucono']})"
+    )
     print()
     print(
         "--- Tabela (σ′, faza, Eoed, |Δe/Δlog σ′| — C_c / C_s / OC wg fazy na wykresie log) ---"

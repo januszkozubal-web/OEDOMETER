@@ -53,7 +53,7 @@ def oblicz_tabele(
     Zwraca tabelę pomiarów oraz słownik stałych (k, e₀, ρ, …).
 
     h0, d0 — wymiary próbki [mm] (wysokość początkowa, średnica).
-    rho_s — ρₛ, ciężar właściwy szkieletu mineralnego (gruntu) [-], wg nomenklatury Z. Wiłuna.
+    rho_s — ρₛ, ciężar właściwy szkieletu  [-], np. Z. Wiłuna.
     """
     if not (len(m_kg) == len(zi_mm) == len(faza)):
         raise ValueError("m, zi i faza muszą mieć tę samą długość.")
@@ -118,7 +118,7 @@ def oblicz_tabele(
 
 
 def _rysuj_sciezke_faz(ax: plt.Axes, x: np.ndarray, y: np.ndarray, faza: np.ndarray) -> None:
-    """Ścieżka łamana z kolorami wg fazy (bez strzałek — czytelniejszy rysunek)."""
+    """Ścieżka łamana z kolorami wg fazy badania."""
     if len(x) < 2:
         return
     for i in range(1, len(x)):
@@ -132,7 +132,7 @@ def rysuj_wykresy(
     sigma_breaks_max: float = 800.0,
     sigma_step: float = 50.0,
 ) -> Tuple[plt.Figure, plt.Figure]:
-    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s wg Wiłuna)."""
+    """Dwa wykresy: h(σ') liniowo; e(σ') przy osi σ' w skali log (C_c / C_s)."""
     x = df["sigma_v"].values
     y_h = df["h"].values
     y_e = df["e"].values
